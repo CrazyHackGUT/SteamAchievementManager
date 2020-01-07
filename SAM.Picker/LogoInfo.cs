@@ -21,6 +21,8 @@
  */
 
 using System.Drawing;
+using System.IO;
+using System.IO.Compression;
 
 namespace SAM.Picker
 {
@@ -33,6 +35,19 @@ namespace SAM.Picker
         {
             this.Id = id;
             this.Bitmap = bitmap;
+        }
+
+        public static LogoInfo FromArchive(ZipArchiveEntry entry, uint Id)
+        {
+            using (var imageStream = entry.Open())
+            {
+                return FromStream(imageStream, Id);
+            }
+        }
+
+        public static LogoInfo FromStream(Stream stream, uint Id)
+        {
+            return new LogoInfo(Id, new Bitmap(stream));
         }
     }
 }

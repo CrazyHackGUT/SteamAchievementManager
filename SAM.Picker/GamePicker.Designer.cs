@@ -232,6 +232,7 @@
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "GamePicker";
             this.Text = "Steam Achievement Manager 7.0 | Pick a game... Any game...";
+            this.FormClosed += new System.Windows.Forms.FormClosedEventHandler(this.GamePicker_FormClosed);
             this._PickerToolStrip.ResumeLayout(false);
             this._PickerToolStrip.PerformLayout();
             this._PickerStatusStrip.ResumeLayout(false);

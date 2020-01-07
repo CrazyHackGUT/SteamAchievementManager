@@ -28,6 +28,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Windows.Forms;
@@ -46,6 +47,7 @@ namespace SAM.Picker
 
         private readonly List<string> _LogosAttempted;
         private readonly ConcurrentQueue<GameInfo> _LogoQueue;
+        private readonly ZipArchive _CacheArchive;
 
         // ReSharper disable PrivateFieldCanBeConvertedToLocalVariable
         private readonly API.Callbacks.AppDataChanged _AppDataChangedCallback;
@@ -58,6 +60,10 @@ namespace SAM.Picker
             this._SelectedGameIndex = -1;
             this._LogosAttempted = new List<string>();
             this._LogoQueue = new ConcurrentQueue<GameInfo>();
+
+            var logoPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "SAM.Picker.Cache.zip");
+            this._CacheArchive = ZipFile.Open(logoPath, ZipArchiveMode.Update);
 
             this.InitializeComponent();
 
@@ -91,13 +97,25 @@ namespace SAM.Picker
 
         private void DoDownloadList(object sender, DoWorkEventArgs e)
         {
-            var pairs = new List<KeyValuePair<uint, string>>();
-            byte[] bytes;
-            using (var downloader = new WebClient())
+            var localPath = "games";
+            var entry = this._CacheArchive.GetEntry(localPath);
+            if (entry == null)
             {
-                bytes = downloader.DownloadData(new Uri("http://gib.me/sam/games.xml"));
+                byte[] bytes;
+                using (var downloader = new WebClient())
+                {
+                    bytes = downloader.DownloadData(new Uri("http://gib.me/sam/games.xml"));
+                }
+
+                entry = this._CacheArchive.CreateEntry("games");
+                using (var stream = entry.Open())
+                {
+                    stream.Write(bytes, 0, bytes.Length);
+                }
             }
-            using (var stream = new MemoryStream(bytes, false))
+
+            var pairs = new List<KeyValuePair<uint, string>>();
+            using (var stream = entry.Open())
             {
                 var document = new XPathDocument(stream);
                 var navigator = document.CreateNavigator();
@@ -234,26 +252,36 @@ namespace SAM.Picker
         private void DoDownloadLogo(object sender, DoWorkEventArgs e)
         {
             var info = (GameInfo)e.Argument;
-            var logoPath = string.Format(
-                CultureInfo.InvariantCulture,
-                "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/{0}/{1}.jpg",
-                info.Id,
-                info.Logo);
-            using (var downloader = new WebClient())
+            var localFilename = $"{info.Id}/{info.Logo}";
+
+            try
             {
-                try
+                var entry = _CacheArchive.GetEntry(localFilename);
+                if (entry == null)
                 {
-                    var data = downloader.DownloadData(new Uri(logoPath));
-                    using (var stream = new MemoryStream(data, false))
+                    var logoPath = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/{0}/{1}.jpg",
+                        info.Id,
+                        info.Logo);
+
+                    using (var downloader = new WebClient())
                     {
-                        var bitmap = new Bitmap(stream);
-                        e.Result = new LogoInfo(info.Id, bitmap);
+                        var data = downloader.DownloadData(new Uri(logoPath));
+                        entry = _CacheArchive.CreateEntry(localFilename, CompressionLevel.Optimal);
+
+                        using (var stream = entry.Open())
+                        {
+                            stream.Write(data, 0, data.Length);
+                        }
                     }
                 }
-                catch (Exception)
-                {
-                    e.Result = new LogoInfo(info.Id, null);
-                }
+
+                e.Result = LogoInfo.FromArchive(entry, info.Id);
+            }
+            catch (Exception)
+            {
+                e.Result = new LogoInfo(info.Id, null);
             }
         }
 
@@ -444,6 +472,11 @@ namespace SAM.Picker
         private void OnFilterUpdate(object sender, EventArgs e)
         {
             this.RefreshGames();
+        }
+
+        private void GamePicker_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            this._CacheArchive.Dispose();
         }
     }
 }
